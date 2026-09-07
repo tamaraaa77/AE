@@ -91,6 +91,8 @@ static uint8_t current_mode = 0U;
 static uint8_t door_state = 0U;
 static uint8_t blink_state = 0U;
 static TimerHandle_t blink_TimerHandle;
+static uint8_t kratka_timer_count = 0U;
+static uint8_t kratka_timer_active = 0U;
 
 /* RECEPTION BUFFERS */
 
@@ -193,6 +195,7 @@ static void TimerCallback(TimerHandle_t xTimer)
     (void)xTimer;
     xSemaphoreGive(Trigger_BinarySemaphore);
 }
+
 static void BlinkTimerCallback(TimerHandle_t xTimer)
 {
     (void)xTimer;
@@ -204,6 +207,18 @@ static void BlinkTimerCallback(TimerHandle_t xTimer)
     else
     {
         blink_state = 0U;
+    }
+
+    if (kratka_timer_active != 0U)
+    {
+        kratka_timer_count++;
+
+        if (kratka_timer_count >= 10U)
+        {
+            kratka_timer_count = 0U;
+            kratka_timer_active = 0U;
+            kratka_state = 0U;
+        }
     }
 
     xSemaphoreGive(Blink_BinarySemaphore);
@@ -585,12 +600,19 @@ void DataProcessing_Task(void* pvParameters)
                 if (average_illumination > illumination_threshold)
                 {
                     drl_state = 1U;
-                    kratka_state = 0U;
+
+                    if ((kratka_state != 0U) && (kratka_timer_active == 0U))
+                    {
+                        kratka_timer_count = 0U;
+                        kratka_timer_active = 1U;
+                    }
                 }
                 else
                 {
                     drl_state = 0U;
                     kratka_state = 1U;
+                    kratka_timer_count = 0U;
+                    kratka_timer_active = 0U;
                 }
             }
         }
@@ -732,6 +754,11 @@ void LEDBar_Task(void* pvParameters)
                 {
                     output |= LEDBar_DiodeToMask(desni_output.broj_diode);
                 }
+            }
+
+            if (door_state != 0U)
+            {
+                output |= LEDBar_DiodeToMask(kabina_output.broj_diode);
             }
         }
 
