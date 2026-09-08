@@ -43,6 +43,7 @@
 #define SENSOR_PERIOD_MS    (200)
 #define PC_SEND_PERIOD_MS   (2000)
 #define DISPLAY_PERIOD_MS   (1500)
+#define DISPLAY_DIGIT_PERIOD_MS   (167)
 
 const char trigger[] = "t";
 
@@ -75,13 +76,16 @@ QueueHandle_t Light_Queue;
 QueueHandle_t Door_Queue;
 
 TimerHandle_t per_TimerHandle;
+TimerHandle_t blink_TimerHandle;
+TimerHandle_t display_TimerHandle;
+
+
 
 /* GLOBAL DATA */
 
 static uint16_t current_illumination = 0U;
+static uint8_t illumination_valid = 0U;
 static uint16_t average_illumination = 0U;
-static uint16_t minimum_illumination = 1000U;
-static uint16_t maximum_illumination = 0U;
 static uint16_t illumination_threshold = 500U;
 
 /* 0 = AUTOMATSKI, 1 = MANUELNI */
@@ -90,7 +94,6 @@ static uint8_t current_mode = 0U;
 /* 0 = zatvorena, 1 = otvorena */
 static uint8_t door_state = 0U;
 static uint8_t blink_state = 0U;
-static TimerHandle_t blink_TimerHandle;
 static uint8_t kratka_timer_count = 0U;
 static uint8_t kratka_timer_active = 0U;
 
@@ -108,6 +111,8 @@ static uint8_t kratka_state = 0U;
 /* 7-SEGMENT */
 
 static const uint8_t hexnum[] = { 0x3F,0x06,0x5B,0x4F,0x66,0x6D,0x7D,0x07,0x7F,0x6F,0x77,0x7C,0x39,0x5E,0x79,0x71 };
+static uint8_t display_digit = 0U;
+static uint8_t display_memory[9] = { 0U };
 
 
 typedef struct
@@ -196,6 +201,7 @@ static void TimerCallback(TimerHandle_t xTimer)
     xSemaphoreGive(Trigger_BinarySemaphore);
 }
 
+
 static void BlinkTimerCallback(TimerHandle_t xTimer)
 {
     (void)xTimer;
@@ -222,6 +228,22 @@ static void BlinkTimerCallback(TimerHandle_t xTimer)
     }
 
     xSemaphoreGive(Blink_BinarySemaphore);
+}
+
+
+static void DisplayTimerCallback(TimerHandle_t xTimer)
+{
+    (void)xTimer;
+
+    select_7seg_digit(display_digit);
+    set_7seg_digit(hexnum[display_memory[display_digit]]);
+
+    display_digit++;
+
+    if (display_digit >= 9U)
+    {
+        display_digit = 0U;
+    }
 }
 
 
@@ -305,29 +327,49 @@ void main_demo(void)
     per_TimerHandle = xTimerCreate("SensorTimer", pdMS_TO_TICKS(SENSOR_PERIOD_MS), pdTRUE, NULL, TimerCallback);
     if (per_TimerHandle == NULL) { while (1); }
     xTimerStart(per_TimerHandle, 0U);
-   
+
     blink_TimerHandle = xTimerCreate("BlinkTimer", pdMS_TO_TICKS(500U), pdTRUE, NULL, BlinkTimerCallback);
     if (blink_TimerHandle == NULL) { while (1); }
     xTimerStart(blink_TimerHandle, 0U);
 
+    display_TimerHandle = xTimerCreate("DisplayTimer", pdMS_TO_TICKS(DISPLAY_DIGIT_PERIOD_MS), pdTRUE, NULL, DisplayTimerCallback);
+    if (display_TimerHandle == NULL) { while (1); }
+    xTimerStart(display_TimerHandle, 0U);
+
     /* TASKOVI */
 
     if (xTaskCreate(SensorLightReceive_Task, "LightRx", configMINIMAL_STACK_SIZE, NULL, TASK_SERIAL_REC_PRI, NULL) != pdPASS)
-    { while (1); }
-    if (xTaskCreate(SensorDoorReceive_Task, "DoorRx", configMINIMAL_STACK_SIZE, NULL, TASK_SERIAL_REC_PRI, NULL) != pdPASS) 
-    { while (1); }
+    {
+        while (1);
+    }
+    if (xTaskCreate(SensorDoorReceive_Task, "DoorRx", configMINIMAL_STACK_SIZE, NULL, TASK_SERIAL_REC_PRI, NULL) != pdPASS)
+    {
+        while (1);
+    }
     if (xTaskCreate(SensorTrigger_Task, "Trigger", configMINIMAL_STACK_SIZE, NULL, TASK_TRIGGER_PRI, NULL) != pdPASS)
-    { while (1); }
+    {
+        while (1);
+    }
     if (xTaskCreate(PCReceive_Task, "PCRx", configMINIMAL_STACK_SIZE, NULL, TASK_PC_REC_PRI, NULL) != pdPASS)
-    { while (1); }
+    {
+        while (1);
+    }
     if (xTaskCreate(PCSend_Task, "PCTx", configMINIMAL_STACK_SIZE, NULL, TASK_PC_SEND_PRI, NULL) != pdPASS)
-    { while (1); }
+    {
+        while (1);
+    }
     if (xTaskCreate(DataProcessing_Task, "Processing", configMINIMAL_STACK_SIZE, NULL, TASK_DATA_PROC_PRI, NULL) != pdPASS)
-    { while (1); }
-    if (xTaskCreate(LCDDisplay_Task, "Display", configMINIMAL_STACK_SIZE, NULL, TASK_LCD_PRI, NULL) != pdPASS) 
-    { while (1); }
-    if (xTaskCreate(LEDBar_Task, "LEDBar", configMINIMAL_STACK_SIZE, NULL, TASK_LED_PRI, NULL) != pdPASS) 
-    { while (1); }
+    {
+        while (1);
+    }
+    if (xTaskCreate(LCDDisplay_Task, "Display", configMINIMAL_STACK_SIZE, NULL, TASK_LCD_PRI, NULL) != pdPASS)
+    {
+        while (1);
+    }
+    if (xTaskCreate(LEDBar_Task, "LEDBar", configMINIMAL_STACK_SIZE, NULL, TASK_LED_PRI, NULL) != pdPASS)
+    {
+        while (1);
+    }
 
 
     /* START SCHEDULER */
@@ -577,8 +619,7 @@ void DataProcessing_Task(void* pvParameters)
         {
             current_illumination = new_illumination;
 
-            if (new_illumination < minimum_illumination) { minimum_illumination = new_illumination; }
-            if (new_illumination > maximum_illumination) { maximum_illumination = new_illumination; }
+            illumination_valid = 1U;
 
             illumination_samples[sample_index] = new_illumination;
             sample_index++;
@@ -633,41 +674,54 @@ void DataProcessing_Task(void* pvParameters)
 void LCDDisplay_Task(void* pvParameters)
 {
     uint16_t value = 0U;
-    uint8_t digit0 = 0U;
-    uint8_t digit1 = 0U;
-    uint8_t digit2 = 0U;
-    uint8_t digit3 = 0U;
+    static uint16_t min_illumination = 1000U;
+    static uint16_t max_illumination = 0U;
+    uint8_t d = 0U;
+    uint16_t value_for_min_max = 0U;
 
     (void)pvParameters;
 
     while (1)
     {
-        value = average_illumination;
+        if (illumination_valid != 0U)
+        {
+            if (current_illumination < min_illumination)
+            {
+                min_illumination = current_illumination;
+            }
 
-        digit0 = (uint8_t)(value % 10U);
-        digit1 = (uint8_t)((value / 10U) % 10U);
-        digit2 = (uint8_t)((value / 100U) % 10U);
-        digit3 = (uint8_t)((value / 1000U) % 10U);
+            if (current_illumination > max_illumination)
+            {
+                max_illumination = current_illumination;
+            }
+        }
 
-        select_7seg_digit(1);
-        set_7seg_digit(hexnum[digit0]);
-        vTaskDelay(pdMS_TO_TICKS(3));
+        value = current_illumination;
 
-        select_7seg_digit(2);
-        set_7seg_digit(hexnum[digit1]);
-        vTaskDelay(pdMS_TO_TICKS(3));
+        (void)get_LED_BAR(0U, &d);
+        if ((d & 0x80U) != 0U)
+        {
+            value_for_min_max = max_illumination;
+        }
+        else
+        {
+            value_for_min_max = min_illumination;
+        }
 
-        select_7seg_digit(3);
-        set_7seg_digit(hexnum[digit2]);
-        vTaskDelay(pdMS_TO_TICKS(3));
+        display_memory[0] = (uint8_t)((value / 1000U) % 10U);
+        display_memory[1] = (uint8_t)((value / 100U) % 10U);
+        display_memory[2] = (uint8_t)((value / 10U) % 10U);
+        display_memory[3] = (uint8_t)(value % 10U);
+        display_memory[4] = current_mode;
 
-        select_7seg_digit(4);
-        set_7seg_digit(hexnum[digit3]);
+        display_memory[5] = (uint8_t)((value_for_min_max / 1000U) % 10U);
+        display_memory[6] = (uint8_t)((value_for_min_max / 100U) % 10U);
+        display_memory[7] = (uint8_t)((value_for_min_max / 10U) % 10U);
+        display_memory[8] = (uint8_t)(value_for_min_max % 10U);
 
         vTaskDelay(pdMS_TO_TICKS(DISPLAY_PERIOD_MS));
     }
 }
-
 
 /* LED BAR TASK */
 void LEDBar_Task(void* pvParameters)
