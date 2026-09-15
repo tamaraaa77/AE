@@ -4,7 +4,6 @@
 #include <string.h>
 #include <stdlib.h>
 
-
 /* KERNEL INCLUDES */
 #include "FreeRTOS.h"
 #include "task.h"
@@ -15,16 +14,12 @@
 /* HARDWARE SIMULATOR UTILITY FUNCTIONS */
 #include "HW_access.h"
 
-
 /* SERIAL CHANNELS */
-
 #define COM_CH_0 (0)       /* senzor osvjetljenja */
 #define COM_CH_1 (1)       /* senzor vrata + poruke prema PC */
 #define COM_CH_2 (2)       /* PC komande */
 
-
 /* TASK PRIORITIES */
-
 #define TASK_SERIAL_REC_PRI (tskIDLE_PRIORITY + 5)
 #define TASK_PC_REC_PRI     (tskIDLE_PRIORITY + 5)
 #define TASK_LED_PRI        (tskIDLE_PRIORITY + 4)
@@ -33,23 +28,17 @@
 #define TASK_TRIGGER_PRI    (tskIDLE_PRIORITY + 2)
 #define TASK_LCD_PRI        (tskIDLE_PRIORITY + 1)
 
-
 /* CONSTANTS */
-
-#define R_BUF_SIZE          (32)
-#define LIGHT_QUEUE_SIZE    (10)
-#define DOOR_QUEUE_SIZE     (10)
-#define LIGHT_AVG_SAMPLES   (10U)
-#define SENSOR_PERIOD_MS    (200)
-#define PC_SEND_PERIOD_MS   (2000)
-#define DISPLAY_PERIOD_MS   (1500)
-#define DISPLAY_DIGIT_PERIOD_MS   (167)
-
-
-
+#define R_BUF_SIZE                  (32)
+#define LIGHT_QUEUE_SIZE            (10)
+#define DOOR_QUEUE_SIZE             (10)
+#define LIGHT_AVG_SAMPLES           (10U)
+#define SENSOR_PERIOD_MS            (200)
+#define PC_SEND_PERIOD_MS           (2000)
+#define DISPLAY_PERIOD_MS           (1500)
+#define DISPLAY_DIGIT_PERIOD_MS     (167)
 
 /* TASK FORWARD DECLARATIONS */
-
 void main_demo(void);
 
 static void SensorLightReceive_Task(void* pvParameters);
@@ -61,9 +50,7 @@ static void DataProcessing_Task(void* pvParameters);
 static void LCDDisplay_Task(void* pvParameters);
 static void LEDBar_Task(void* pvParameters);
 
-
 /* GLOBAL OS HANDLES */
-
 static SemaphoreHandle_t LED_INT_BinarySemaphore;
 static SemaphoreHandle_t TBE_BinarySemaphore0;
 static SemaphoreHandle_t TBE_BinarySemaphore1;
@@ -74,14 +61,13 @@ static SemaphoreHandle_t RXC_BinarySemaphore2;
 static SemaphoreHandle_t Trigger_BinarySemaphore;
 static SemaphoreHandle_t Blink_BinarySemaphore;
 
+/* MUTEX ZA ZASTITU COM_CH_1 */
+static SemaphoreHandle_t COM1_Mutex;
+
 static QueueHandle_t Light_Queue;
 static QueueHandle_t Door_Queue;
 
-
-
-
 /* GLOBAL DATA */
-
 static uint16_t current_illumination = 0U;
 static uint8_t illumination_valid = 0U;
 static uint16_t average_illumination = 0U;
@@ -97,15 +83,12 @@ static uint8_t kratka_timer_count = 0U;
 static uint8_t kratka_timer_active = 0U;
 
 /* RECEPTION BUFFERS */
-
 static uint8_t drl_state = 0U;
 static uint8_t kratka_state = 0U;
 
 /* 7-SEGMENT */
-
 static const uint8_t hexnum[] = { 0x3F,0x06,0x5B,0x4F,0x66,0x6D,0x7D,0x07,0x7F,0x6F,0x77,0x7C,0x39,0x5E,0x79,0x71 };
 static uint8_t display_memory[9] = { 0U };
-
 
 typedef struct
 {
@@ -113,10 +96,7 @@ typedef struct
     uint8_t broj_diode;
 } LEDBarData;
 
-
-
 /* INTERRUPTS */
-
 static uint32_t OnLED_ChangeInterrupt(void)
 {
     BaseType_t xHigherPTW = pdFALSE;
@@ -124,7 +104,6 @@ static uint32_t OnLED_ChangeInterrupt(void)
     xSemaphoreGiveFromISR(LED_INT_BinarySemaphore, &xHigherPTW);
     portYIELD_FROM_ISR(xHigherPTW);
 }
-
 
 static uint32_t prvProcessTBEInterrupt(void)
 {
@@ -137,7 +116,6 @@ static uint32_t prvProcessTBEInterrupt(void)
     portYIELD_FROM_ISR(xHigherPTW);
 }
 
-
 static uint32_t prvProcessRXCInterrupt(void)
 {
     BaseType_t xHigherPTW = pdFALSE;
@@ -149,15 +127,12 @@ static uint32_t prvProcessRXCInterrupt(void)
     portYIELD_FROM_ISR(xHigherPTW);
 }
 
-
-/* TIMER CALLBACK */
-
+/* TIMER CALLBACKS */
 static void TimerCallback(TimerHandle_t xTimer)
 {
     (void)xTimer;
     xSemaphoreGive(Trigger_BinarySemaphore);
 }
-
 
 static void BlinkTimerCallback(TimerHandle_t xTimer)
 {
@@ -187,7 +162,6 @@ static void BlinkTimerCallback(TimerHandle_t xTimer)
     xSemaphoreGive(Blink_BinarySemaphore);
 }
 
-
 static void DisplayTimerCallback(TimerHandle_t xTimer)
 {
     static uint8_t display_digit = 0U;
@@ -205,8 +179,7 @@ static void DisplayTimerCallback(TimerHandle_t xTimer)
     }
 }
 
-
-/* MAIN */
+/* HELPER FUNCTIONS */
 static uint8_t LEDBar_DiodeToMask(uint8_t broj_diode)
 {
     uint8_t mask = 0U;
@@ -218,6 +191,8 @@ static uint8_t LEDBar_DiodeToMask(uint8_t broj_diode)
 
     return mask;
 }
+
+/* MAIN */
 void main_demo(void)
 {
     TimerHandle_t per_TimerHandle;
@@ -226,7 +201,6 @@ void main_demo(void)
     const BaseType_t task_create_pass = (BaseType_t)1;
 
     /* PERIPHERALS */
-
     init_LED_comm();
     set_LED_BAR(1U, 0U);
     init_7seg_comm();
@@ -243,16 +217,12 @@ void main_demo(void)
     select_7seg_digit(4);
     set_7seg_digit(hexnum[0]);
 
-
     /* INTERRUPTS */
-
     vPortSetInterruptHandler(portINTERRUPT_SRL_OIC, OnLED_ChangeInterrupt);
     vPortSetInterruptHandler(portINTERRUPT_SRL_TBE, prvProcessTBEInterrupt);
     vPortSetInterruptHandler(portINTERRUPT_SRL_RXC, prvProcessRXCInterrupt);
 
-
-    /* SEMAPHORES */
-
+    /* SEMAPHORES & MUTEX */
     LED_INT_BinarySemaphore = xSemaphoreCreateBinary();
     TBE_BinarySemaphore0 = xSemaphoreCreateBinary();
     TBE_BinarySemaphore1 = xSemaphoreCreateBinary();
@@ -263,14 +233,13 @@ void main_demo(void)
     Trigger_BinarySemaphore = xSemaphoreCreateBinary();
     Blink_BinarySemaphore = xSemaphoreCreateBinary();
 
-    /* QUEUES */
+    COM1_Mutex = xSemaphoreCreateMutex();
 
+    /* QUEUES */
     Light_Queue = xQueueCreate(LIGHT_QUEUE_SIZE, sizeof(uint16_t));
     Door_Queue = xQueueCreate(DOOR_QUEUE_SIZE, sizeof(uint8_t));
 
-
-    /* CHECK SEMAPHORES */
-
+    /* CHECK SEMAPHORES & MUTEX */
     if (LED_INT_BinarySemaphore == NULL) { for (;;) {} }
     if (TBE_BinarySemaphore0 == NULL) { for (;;) {} }
     if (TBE_BinarySemaphore1 == NULL) { for (;;) {} }
@@ -282,12 +251,12 @@ void main_demo(void)
 
     if (Trigger_BinarySemaphore == NULL) { for (;;) {} }
     if (Blink_BinarySemaphore == NULL) { for (;;) {} }
+    if (COM1_Mutex == NULL) { for (;;) {} }
 
     if (Light_Queue == NULL) { for (;;) {} }
     if (Door_Queue == NULL) { for (;;) {} }
 
     /* TAJMERI */
-
     per_TimerHandle = xTimerCreate("SensorTimer", pdMS_TO_TICKS(SENSOR_PERIOD_MS), pdTRUE, NULL, TimerCallback);
     if (per_TimerHandle == NULL) { for (;;) {} }
     (void)xTimerStart(per_TimerHandle, 0U);
@@ -301,7 +270,6 @@ void main_demo(void)
     (void)xTimerStart(display_TimerHandle, 0U);
 
     /* TASKOVI */
-
     if (xTaskCreate(SensorLightReceive_Task, "LightRx", configMINIMAL_STACK_SIZE, NULL, TASK_SERIAL_REC_PRI, NULL) != task_create_pass) { for (;;) {} }
     if (xTaskCreate(SensorDoorReceive_Task, "DoorRx", configMINIMAL_STACK_SIZE, NULL, TASK_SERIAL_REC_PRI, NULL) != task_create_pass) { for (;;) {} }
     if (xTaskCreate(SensorTrigger_Task, "Trigger", configMINIMAL_STACK_SIZE, NULL, TASK_TRIGGER_PRI, NULL) != task_create_pass) { for (;;) {} }
@@ -311,17 +279,13 @@ void main_demo(void)
     if (xTaskCreate(LCDDisplay_Task, "Display", configMINIMAL_STACK_SIZE, NULL, TASK_LCD_PRI, NULL) != task_create_pass) { for (;;) {} }
     if (xTaskCreate(LEDBar_Task, "LEDBar", configMINIMAL_STACK_SIZE, NULL, TASK_LED_PRI, NULL) != task_create_pass) { for (;;) {} }
 
-
     /* START SCHEDULER */
-
     vTaskStartScheduler();
 
     for (;;) {}
 }
 
-
 /* SENSOR LIGHT RECEIVE TASK */
-
 static void SensorLightReceive_Task(void* pvParameters)
 {
     uint8_t cc = 0U;
@@ -344,12 +308,9 @@ static void SensorLightReceive_Task(void* pvParameters)
             if (cc == 0x0DU)
             {
                 light_buffer[light_point] = (uint8_t)'\0';
-
                 illumination = (uint16_t)atoi((const char*)light_buffer);
 
                 if (illumination > 1000U) { illumination = 1000U; }
-
-                //printf("SVJETLO: %u\n", (unsigned)illumination);
 
                 xQueueSend(Light_Queue, &illumination, 0U);
 
@@ -369,9 +330,7 @@ static void SensorLightReceive_Task(void* pvParameters)
     }
 }
 
-
 /* SENSOR DOOR RECEIVE TASK */
-
 static void SensorDoorReceive_Task(void* pvParameters)
 {
     uint8_t cc = 0U;
@@ -394,7 +353,6 @@ static void SensorDoorReceive_Task(void* pvParameters)
             if (cc == 0x0DU)
             {
                 door_buffer[door_point] = (uint8_t)'\0';
-
                 door = (uint8_t)atoi((const char*)door_buffer);
 
                 if (door != 0U) { door = 1U; }
@@ -417,9 +375,7 @@ static void SensorDoorReceive_Task(void* pvParameters)
     }
 }
 
-
 /* SENSOR TRIGGER TASK */
-
 static void SensorTrigger_Task(void* pvParameters)
 {
     static const char trigger[] = "t";
@@ -432,26 +388,26 @@ static void SensorTrigger_Task(void* pvParameters)
         xSemaphoreTake(Trigger_BinarySemaphore, (TickType_t)portMAX_DELAY);
 
         /* CHANNEL 0 - SVJETLO */
-
         for (i = 0U; i < (uint8_t)(sizeof(trigger) - 1U); i++)
         {
             send_serial_character(COM_CH_0, (uint8_t)trigger[i]);
             xSemaphoreTake(TBE_BinarySemaphore0, (TickType_t)portMAX_DELAY);
         }
 
-        /* CHANNEL 1 - VRATA */
-
-        for (i = 0U; i < (uint8_t)(sizeof(trigger) - 1U); i++)
+        /* CHANNEL 1 - VRATA (Zasticeno Mutex-om) */
+        if (xSemaphoreTake(COM1_Mutex, (TickType_t)portMAX_DELAY) == pdTRUE)
         {
-            send_serial_character(COM_CH_1, (uint8_t)trigger[i]);
-            xSemaphoreTake(TBE_BinarySemaphore1, (TickType_t)portMAX_DELAY);
+            for (i = 0U; i < (uint8_t)(sizeof(trigger) - 1U); i++)
+            {
+                send_serial_character(COM_CH_1, (uint8_t)trigger[i]);
+                xSemaphoreTake(TBE_BinarySemaphore1, (TickType_t)portMAX_DELAY);
+            }
+            xSemaphoreGive(COM1_Mutex);
         }
     }
 }
 
-
 /* PC RECEIVE TASK */
-
 static void PCReceive_Task(void* pvParameters)
 {
     uint8_t cc = 0U;
@@ -474,51 +430,33 @@ static void PCReceive_Task(void* pvParameters)
             {
                 pc_buffer[pc_point] = (uint8_t)'\0';
 
-                // printf("PC komanda: %s\n", (char*)pc_buffer);
-
-                 /* PRAG */
-
+                /* PRAG */
                 if (strncmp((const char*)pc_buffer, "PRAG", 4U) == 0)
                 {
                     illumination_threshold = (uint16_t)atoi((const char*)&pc_buffer[4]);
-
                     if (illumination_threshold > 1000U) { illumination_threshold = 1000U; }
-
-                    // printf("Novi prag: %u\n", (unsigned)illumination_threshold);
                 }
-
                 /* MANUELNO */
-
                 else if (strcmp((const char*)pc_buffer, "MANUELNO") == 0)
                 {
                     current_mode = 1U;
 
-                    //printf("MANUELNI MOD\n");
-
                     send_serial_character(COM_CH_2, (uint8_t)'O');
                     xSemaphoreTake(TBE_BinarySemaphore2, (TickType_t)portMAX_DELAY);
 
                     send_serial_character(COM_CH_2, (uint8_t)'K');
                     xSemaphoreTake(TBE_BinarySemaphore2, (TickType_t)portMAX_DELAY);
                 }
-
                 /* AUTOMATSKI */
-
                 else if (strcmp((const char*)pc_buffer, "AUTOMATSKI") == 0)
                 {
                     current_mode = 0U;
 
-                    //  printf("AUTOMATSKI MOD\n");
-
                     send_serial_character(COM_CH_2, (uint8_t)'O');
                     xSemaphoreTake(TBE_BinarySemaphore2, (TickType_t)portMAX_DELAY);
 
                     send_serial_character(COM_CH_2, (uint8_t)'K');
                     xSemaphoreTake(TBE_BinarySemaphore2, (TickType_t)portMAX_DELAY);
-                }
-                else
-                {
-                    /* Nepoznata PC komanda */
                 }
 
                 pc_point = 0U;
@@ -537,9 +475,7 @@ static void PCReceive_Task(void* pvParameters)
     }
 }
 
-
 /* PC SEND TASK */
-
 static void PCSend_Task(void* pvParameters)
 {
     char message[64];
@@ -552,19 +488,22 @@ static void PCSend_Task(void* pvParameters)
     {
         length = (uint16_t)sprintf(message, "OSVJETLJENJE:%u MOD:%u\r\n", (uint32_t)average_illumination, (uint32_t)current_mode);
 
-        for (i = 0U; i < (uint8_t)length; i++)
+        /* Zasticeno Mutex-om zbog dijeljenja COM_CH_1 sa SensorTrigger_Task */
+        if (xSemaphoreTake(COM1_Mutex, (TickType_t)portMAX_DELAY) == pdTRUE)
         {
-            send_serial_character(COM_CH_1, (uint8_t)message[i]);
-            xSemaphoreTake(TBE_BinarySemaphore1, (TickType_t)portMAX_DELAY);
+            for (i = 0U; i < (uint8_t)length; i++)
+            {
+                send_serial_character(COM_CH_1, (uint8_t)message[i]);
+                xSemaphoreTake(TBE_BinarySemaphore1, (TickType_t)portMAX_DELAY);
+            }
+            xSemaphoreGive(COM1_Mutex);
         }
 
         vTaskDelay(pdMS_TO_TICKS(PC_SEND_PERIOD_MS));
     }
 }
 
-
 /* DATA PROCESSING TASK */
-
 static void DataProcessing_Task(void* pvParameters)
 {
     uint16_t new_illumination = 0U;
@@ -584,7 +523,6 @@ static void DataProcessing_Task(void* pvParameters)
         if (xQueueReceive(Light_Queue, &new_illumination, pdMS_TO_TICKS(10)) == pdPASS)
         {
             current_illumination = new_illumination;
-
             illumination_valid = 1U;
 
             illumination_samples[sample_index] = new_illumination;
@@ -594,14 +532,13 @@ static void DataProcessing_Task(void* pvParameters)
             if (sample_count < (uint8_t)LIGHT_AVG_SAMPLES) { sample_count++; }
 
             sum = 0U;
-
             for (i = 0U; i < sample_count; i++) { sum += illumination_samples[i]; }
 
             if (sample_count > 0U)
             {
                 average_illumination = (uint16_t)(sum / sample_count);
-                //printf("AVG: %u\n", (unsigned)average_illumination);
             }
+
             if (current_mode == 0U)
             {
                 if (average_illumination > illumination_threshold)
@@ -627,16 +564,13 @@ static void DataProcessing_Task(void* pvParameters)
         if (xQueueReceive(Door_Queue, &new_door_state, 0U) == pdPASS)
         {
             door_state = new_door_state;
-            //printf("Vrata: %u\n", (unsigned)door_state);
         }
 
         vTaskDelay(pdMS_TO_TICKS(1));
     }
 }
 
-
 /* DISPLAY TASK */
-
 static void LCDDisplay_Task(void* pvParameters)
 {
     uint16_t value = 0U;
